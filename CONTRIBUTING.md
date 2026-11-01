@@ -183,3 +183,4 @@ bumped in a pull request first, then the tag is pushed on that `main` commit:
 
 `.github/workflows/tag.yml` fails when a tag is malformed, not on `main`, or does
 not match `version.go` — it cannot un-publish, but it tells you immediately.
+
