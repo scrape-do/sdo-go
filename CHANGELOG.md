@@ -3,6 +3,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Security
+
+- Dependency: `golang.org/x/net` v0.62.0. Below it, the HTML parser's
+  text-node coalescing was quadratic (GO-2026-6860), reachable through
+  `html.Document`.
+
 ## [0.1.0] - 2026-11-01
 
 The first release of the Go SDK (`github.com/scrape-do/sdo-go`, package `sdo`).
