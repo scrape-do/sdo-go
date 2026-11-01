@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: Apache-2.0
+name: security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Weekly, so a new advisory against unchanged code still surfaces.
+  schedule:
+    - cron: "17 5 * * 1"
+
+# Least privilege: grant nothing by default, then scope each job explicitly.
+permissions: {}
+
+# Every job runs on GitHub-hosted runners except Scorecard, which reads the
+# repository through the GitHub API: the org's IP allow list only accepts
+# those calls from the self-hosted runners.
+
+jobs:
+  # Secret scanning across the full git history. Uses a version-pinned, checksum
+  # -verified gitleaks binary (license-free, no org entitlement required).
+  gitleaks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history for a complete secret scan
+          persist-credentials: false
+      - name: Scan git history for secrets (gitleaks)
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          curl -sSfL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          # The config and the ignore list come from this workflow, never from the
+          # checkout: a pull request could otherwise add a .gitleaks.toml or a
+          # .gitleaksignore that allowlists the secret it introduces.
+          cfg="$(mktemp -d "$RUNNER_TEMP/gitleaks.XXXXXX")"
+          printf '[extend]\nuseDefault = true\n' > "$cfg/gitleaks.toml"
+          ./gitleaks git . --no-banner --redact --exit-code 1 \
+            --config "$cfg/gitleaks.toml" --gitleaks-ignore-path "$cfg"
+
+  # Scans the Go module manifest against the OSV vulnerability database.
+  osv-scanner:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: google/osv-scanner-action/osv-scanner-action@b1d267aea5211fa648d9d442fa64b90dbdcbdd36 # v2.7.0
+        with:
+          scan-args: |-
+            --lockfile=./go.mod
+
+  # Software Bill of Materials (syft), uploaded as a build artifact.
+  sbom:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Generate SBOM (syft)
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          path: .
+          format: spdx-json
+          output-file: sdo-go.spdx.json
+          artifact-name: sdo-go.spdx.json
+          upload-artifact: true
+
+  # OpenSSF Scorecard, for the default branch only (pushes to main and the
+  # weekly run). It reads the repository through the GitHub API, which the
+  # org's IP allow list only permits from the self-hosted runners. Publishing to
+  # the Scorecard API needs a GitHub-hosted runner, so results go to code
+  # scanning only.
+  scorecard:
+    if: github.event_name != 'pull_request'
+    runs-on: self-hosted
+    permissions:
+      security-events: write # upload SARIF to code scanning
+      contents: read
+    steps:
+      # The persistent runners may still hold root-owned files that an older,
+      # container-based job left in this workspace; reclaim them before the
+      # checkout cleans it.
+      - name: Reclaim the workspace
+        working-directory: ${{ github.workspace }}
+        run: docker run --rm -v "$PWD:/w" golang:1.27 chown -R "$(id -u):$(id -g)" /w
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run OpenSSF Scorecard
+        uses: ossf/scorecard-action@fa7117db83c52d787ae5a89f350999701505d78e # v2.5.0
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: false
+      - name: Upload Scorecard SARIF artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-results
+          path: results.sarif
+          retention-days: 5
+      - name: Upload Scorecard results to code scanning
+        uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          sarif_file: results.sarif

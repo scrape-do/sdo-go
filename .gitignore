@@ -1,0 +1,4 @@
+*.test
+*.out
+/sdo
+.DS_Store

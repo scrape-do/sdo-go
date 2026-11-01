@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# A Go module is "published" by its tag: the module proxy fetches it on first
+# request, and a tag cannot be taken back. So every version tag is checked:
+# it must be on main and name the version in version.go.
+#   vX.Y.Z-rc.N  release candidate (a Go pre-release; `@latest` never picks it)
+#   vX.Y.Z       release
+name: tag
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions: {}
+
+jobs:
+  check:
+    if: github.repository_owner == 'scrape-do'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # the main-ancestry check needs origin/main
+          persist-credentials: false
+      - name: The tag is well-formed, on main and matches version.go
+        run: |
+          set -euo pipefail
+          if ! [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]; then
+            echo "::error::$GITHUB_REF_NAME is neither vX.Y.Z nor vX.Y.Z-rc.N"; exit 1
+          fi
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main \
+            || { echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main"; exit 1; }
+          want="v$(sed -n 's/^const Version = "\(.*\)"$/\1/p' version.go)"
+          if [ "$GITHUB_REF_NAME" != "$want" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version.go ($want)"; exit 1
+          fi

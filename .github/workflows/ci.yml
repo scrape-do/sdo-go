@@ -1,0 +1,141 @@
+# SPDX-License-Identifier: Apache-2.0
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+# Every job runs on GitHub-hosted runners: free for a public repository, a
+# clean image every time, and no code from outside the org ever reaches the
+# org's persistent self-hosted runners. CodeQL is the one exception: uploading
+# its results is a GitHub API call, which the org's IP allow list only accepts
+# from the self-hosted runners, so same-repository events analyse there; a pull
+# request from a fork analyses on a GitHub-hosted runner and keeps its SARIF as
+# an artifact instead.
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        go: ["1.26", "1.27"] # go.mod's floor, and the current release
+        include:
+          - { os: macos-latest, go: "1.27" }
+          - { os: windows-latest, go: "1.27" }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+          check-latest: true # the newest patch release, not one cached on the runner
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  # Format + coverage floor run once, on Linux, not across the OS matrix: the
+  # scripts are bash (Windows runners default to PowerShell) and a CRLF checkout
+  # on Windows would make gofmt flag every file. The coverage floor is 99%.
+  quality:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          check-latest: true
+      - name: Check formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt: $unformatted" >&2
+            gofmt -d .
+            exit 1
+          fi
+      - name: Coverage floor (99%)
+        run: |
+          go test -race -coverprofile=coverage.out ./...
+          pct=$(go tool cover -func=coverage.out | awk '/^total:/ {print substr($3, 1, length($3)-1)}')
+          echo "total coverage: $pct%"
+          awk -v p="$pct" 'BEGIN { exit (p+0 >= 99) ? 0 : 1 }' || {
+            echo "::error::coverage $pct% is below the 99% floor" >&2; exit 1; }
+
+  api-surface:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          check-latest: true
+      - name: Check public API surface for drift
+        run: |
+          go run tools/apisurface/main.go > api-surface.txt
+          if ! git diff --exit-code api-surface.txt; then
+            echo "::error::Public API surface changed. Regenerate with 'go run tools/apisurface/main.go > api-surface.txt' and commit api-surface.txt." >&2
+            exit 1
+          fi
+
+  govulncheck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable # the newest standard library
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 # pinned: @latest reintroduces the supply-chain hole SHA-pinning closes
+      - run: govulncheck ./...
+
+  codeql:
+    runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && 'self-hosted' || 'ubuntu-latest' }}
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      # The persistent runners may still hold root-owned files that an older,
+      # container-based job left in this workspace; reclaim them before the
+      # checkout cleans it.
+      - name: Reclaim the workspace
+        if: runner.environment == 'self-hosted'
+        working-directory: ${{ github.workspace }}
+        run: docker run --rm -v "$PWD:/w" golang:1.27 chown -R "$(id -u):$(id -g)" /w
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          check-latest: true
+      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          languages: go
+      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+        with:
+          upload: ${{ runner.environment == 'self-hosted' && 'always' || 'never' }}
+          output: codeql-sarif
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: runner.environment != 'self-hosted'
+        with:
+          name: codeql-sarif
+          path: codeql-sarif/
+          retention-days: 5
