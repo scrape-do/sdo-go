@@ -4,6 +4,15 @@
 # module github.com/scrape-do/sdo-go
 # package sdo
 # package html
+const JobSortStartTimeAsc string
+const JobSortStartTimeDesc string
+const JobStatusCanceled string
+const JobStatusError string
+const JobStatusPending string
+const JobStatusQueued string
+const JobStatusQueuing string
+const JobStatusRotating string
+const JobStatusSuccess string
 const KindAuth ErrorKind
 const KindConcurrency ErrorKind
 const KindGateway ErrorKind
@@ -24,13 +33,26 @@ field ConfigError Message string
 field Job JobID string
 field Job Message string
 field Job TaskIDs []string
+field JobPage Jobs []JobStatus
+field JobPage PageNumber int
+field JobPage PageSize int
+field JobPage TotalCount int
+field JobPage TotalPages int
+field JobStatus AcquiredConcurrency int
 field JobStatus Canceled bool
 field JobStatus EndTime string
 field JobStatus JobID string
+field JobStatus LimitConcurrency int
 field JobStatus StartTime string
 field JobStatus Status string
 field JobStatus TaskIDs []string
 field JobStatus Tasks []Task
+field ListJobsOptions Page int
+field ListJobsOptions PageSize int
+field ListJobsOptions Sort string
+field ListJobsOptions StartFrom time.Time
+field ListJobsOptions StartTo time.Time
+field ListJobsOptions Status string
 field Request Data []byte
 field Request Headers map[string]string
 field Request JSON any
@@ -125,8 +147,9 @@ method APIError.RetryAfter() (time.Duration, bool)
 method Account.UnmarshalJSON(data []byte) error
 method AsyncJobs.Cancel(ctx context.Context, jobID string) error
 method AsyncJobs.Create(ctx context.Context, targets []string, options map[string]any) (*Job, error)
+method AsyncJobs.CreatePlugin(ctx context.Context, key string, params []map[string]any, options map[string]any) (*Job, error)
 method AsyncJobs.GoString() string
-method AsyncJobs.List(ctx context.Context) ([]JobStatus, error)
+method AsyncJobs.List(ctx context.Context, opts *ListJobsOptions) (*JobPage, error)
 method AsyncJobs.Me(ctx context.Context) (*Account, error)
 method AsyncJobs.Result(ctx context.Context, jobID, taskID string) (*TaskResult, error)
 method AsyncJobs.Status(ctx context.Context, jobID string) (*JobStatus, error)
@@ -143,6 +166,7 @@ method Client.Usage(ctx context.Context) (*Usage, error)
 method ConfigError.Error() string
 method ErrorKind.String() string
 method Job.UnmarshalJSON(data []byte) error
+method JobPage.UnmarshalJSON(data []byte) error
 method JobStatus.UnmarshalJSON(data []byte) error
 method ResponseTooLargeError.Error() string
 method Result.Bytes() []byte
@@ -168,7 +192,9 @@ type Client struct
 type ConfigError struct
 type ErrorKind int
 type Job struct
+type JobPage struct
 type JobStatus struct
+type ListJobsOptions struct
 type Option func(*clientConfig)
 type Request struct
 type ResponseTooLargeError struct

@@ -240,12 +240,27 @@ jobs := client.Jobs()
 job, err := jobs.Create(ctx, []string{"https://example.com"},
 	map[string]any{"Super": true, "GeoCode": "us"})
 
+// A plugin job: one task per params entry (at most 1000), with the plugin's own
+// parameter names. Targets and a plugin cannot be combined in one job.
+pjob, err := jobs.CreatePlugin(ctx, "amazon/pdp",
+	[]map[string]any{{"asin": "B0C7BKZ883", "geocode": "us"}, {"asin": "B0BSHF7WHW", "geocode": "us"}},
+	map[string]any{"WebhookURL": "https://example.com/hook"})
+
 status, err := jobs.Status(ctx, job.JobID)          // job + per-task state
 task, err := jobs.Result(ctx, job.JobID, "TASK_ID") // one task's delivered content
 body, err := task.ContentBytes()                     // base64-decoded for binary targets
-all, err := jobs.List(ctx)                           // every visible job
 err = jobs.Cancel(ctx, job.JobID)                    // cancel a job
 acct, err := jobs.Me(ctx)                            // concurrency + credits snapshot
+
+// List is paginated: nil options give the 10 most recent jobs. Filter by
+// status and start time, sort, and walk pages up to page.TotalPages.
+page, err := jobs.List(ctx, &sdo.ListJobsOptions{
+	Status:    sdo.JobStatusSuccess,
+	StartFrom: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+	Sort:      sdo.JobSortStartTimeAsc,
+	Page:      2,
+	PageSize:  25, // 1-100
+})
 ```
 
 Job and task ids are validated (`^[A-Za-z0-9_-]{1,128}$`) before they reach the
@@ -255,7 +270,12 @@ redaction. Any non-2xx job response, a redirect included, is a
 API errors are never billed). Responses are decoded leniently: a missing or
 mistyped field reads as its zero value instead of failing the call, and a 2xx
 body that is not a JSON object is a `*sdo.TransportError`. `Cancel` ignores the
-response body.
+response body. Invalid plugin keys, an empty or oversized `Params` list, and
+List options outside the documented values (page size 1-100, the seven job
+statuses, the two sort orders) are a `*sdo.ConfigError` before anything is
+sent. The async API runs on its own concurrency pool (30% of the plan's limit,
+not taken from the main API's); `JobStatus.AcquiredConcurrency` and
+`LimitConcurrency` report a job's share of it.
 
 ## CI/CD workflows
 

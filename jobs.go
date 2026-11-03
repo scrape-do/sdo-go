@@ -13,8 +13,10 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // jobsAPIPrefix is the versioned REST base path on q.scrape.do.
@@ -69,15 +71,36 @@ func taskFrom(f jobFields) Task {
 	return Task{TaskID: f.str("TaskID"), URL: f.str("URL"), Status: f.str("Status")}
 }
 
-// JobStatus is the full state of a job and its tasks.
+// JobStatus is the full state of a job and its tasks. Status is one of the
+// JobStatus* values. AcquiredConcurrency and LimitConcurrency are the job's
+// share of the account's separate async concurrency pool.
 type JobStatus struct {
-	JobID     string   `json:"JobID"`
-	TaskIDs   []string `json:"TaskIDs"`
-	Status    string   `json:"Status"`
-	StartTime string   `json:"StartTime"`
-	EndTime   string   `json:"EndTime"`
-	Canceled  bool     `json:"Canceled"`
-	Tasks     []Task   `json:"Tasks"`
+	JobID               string   `json:"JobID"`
+	TaskIDs             []string `json:"TaskIDs"`
+	Status              string   `json:"Status"`
+	StartTime           string   `json:"StartTime"`
+	EndTime             string   `json:"EndTime"`
+	AcquiredConcurrency int      `json:"AcquiredConcurrency"`
+	LimitConcurrency    int      `json:"LimitConcurrency"`
+	Canceled            bool     `json:"Canceled"`
+	Tasks               []Task   `json:"Tasks"`
+}
+
+// The job statuses the API documents, for JobStatus.Status, Task.Status,
+// TaskResult.Status and the ListJobsOptions.Status filter.
+const (
+	JobStatusQueuing  = "queuing"
+	JobStatusQueued   = "queued"
+	JobStatusPending  = "pending"
+	JobStatusRotating = "rotating"
+	JobStatusSuccess  = "success"
+	JobStatusError    = "error"
+	JobStatusCanceled = "canceled"
+)
+
+var jobStatuses = []string{
+	JobStatusQueuing, JobStatusQueued, JobStatusPending, JobStatusRotating,
+	JobStatusSuccess, JobStatusError, JobStatusCanceled,
 }
 
 // UnmarshalJSON decodes a job status leniently.
@@ -86,9 +109,12 @@ func (s *JobStatus) UnmarshalJSON(data []byte) error {
 }
 
 func jobStatusFrom(f jobFields) JobStatus {
+	acquired, _ := f.integer("AcquiredConcurrency")
+	limit, _ := f.integer("LimitConcurrency")
 	st := JobStatus{
 		JobID: f.str("JobID"), TaskIDs: f.strList("TaskIDs"), Status: f.str("Status"),
-		StartTime: f.str("StartTime"), EndTime: f.str("EndTime"), Canceled: f.boolean("Canceled"),
+		StartTime: f.str("StartTime"), EndTime: f.str("EndTime"),
+		AcquiredConcurrency: acquired, LimitConcurrency: limit, Canceled: f.boolean("Canceled"),
 	}
 	for _, t := range f.objects("Tasks") {
 		st.Tasks = append(st.Tasks, taskFrom(t))
@@ -222,21 +248,59 @@ func (j *AsyncJobs) do(ctx context.Context, method, path string, body []byte, ou
 
 // Create submits a job for one or more target URLs. options is merged into the
 // JSON body using the API's own PascalCase job-body keys (e.g. "Super",
-// "GeoCode", "Render", "Output"); it is not ScrapeConfig query serialization.
-// The body is canonical JSON. targets must be non-empty, and options may not
-// set "Targets".
+// "GeoCode", "Render", "Output", "WebhookURL"); it is not ScrapeConfig query
+// serialization. The body is canonical JSON. targets must be non-empty, and
+// options may set neither "Targets" nor "Plugin" (a plugin job is
+// CreatePlugin).
 func (j *AsyncJobs) Create(ctx context.Context, targets []string, options map[string]any) (*Job, error) {
 	if len(targets) == 0 {
 		return nil, &ConfigError{Message: "Create needs at least one target URL"}
 	}
+	return j.create(ctx, "Targets", targets, options)
+}
+
+// maxPluginParams is the API's limit on Params entries (tasks) per plugin job.
+const maxPluginParams = 1000
+
+// pluginKeyRe is the shape of a documented plugin key, e.g. "amazon/pdp" or
+// "google/shopping/product/stores".
+var pluginKeyRe = regexp.MustCompile(`^[a-z0-9-]+(/[a-z0-9-]+)+$`)
+
+// CreatePlugin submits a plugin job: key names the plugin (e.g. "amazon/pdp",
+// "google/search") and each entry of params becomes one task, with the
+// plugin's own parameter names (e.g. {"asin": "B0...", "geocode": "us"}).
+// params must hold 1 to 1000 entries. options is merged into the body like
+// Create's (e.g. "GeoCode", "WebhookURL", "WebhookHeaders") and may set
+// neither "Targets" nor "Plugin": the API rejects a job that has both.
+func (j *AsyncJobs) CreatePlugin(ctx context.Context, key string, params []map[string]any, options map[string]any) (*Job, error) {
+	if !pluginKeyRe.MatchString(key) {
+		return nil, &ConfigError{Message: fmt.Sprintf(
+			"invalid plugin key %q: it is a documented plugin path such as amazon/pdp or google/search", key)}
+	}
+	if len(params) == 0 || len(params) > maxPluginParams {
+		return nil, &ConfigError{Message: fmt.Sprintf(
+			"a plugin job needs 1 to %d params entries (one per task), got %d", maxPluginParams, len(params))}
+	}
+	for i, p := range params {
+		if p == nil {
+			return nil, &ConfigError{Message: fmt.Sprintf("plugin params entry %d is nil", i)}
+		}
+	}
+	return j.create(ctx, "Plugin", map[string]any{"Key": key, "Params": params}, options)
+}
+
+// create builds a job body from options plus the job's one source, "Targets"
+// or "Plugin", and posts it.
+func (j *AsyncJobs) create(ctx context.Context, sourceKey string, source any, options map[string]any) (*Job, error) {
 	payload := make(map[string]any, len(options)+1)
 	for k, v := range options {
-		if strings.EqualFold(k, "Targets") {
-			return nil, &ConfigError{Message: "options may not set Targets; pass them as the targets argument"}
+		if strings.EqualFold(k, "Targets") || strings.EqualFold(k, "Plugin") {
+			return nil, &ConfigError{Message: fmt.Sprintf(
+				"options may not set %s: a job has either targets (Create) or a plugin (CreatePlugin)", k)}
 		}
 		payload[k] = v
 	}
-	payload["Targets"] = targets
+	payload[sourceKey] = source
 	body, err := canonicalJSON(payload)
 	if err != nil {
 		return nil, &ConfigError{Message: fmt.Sprintf("job options are not JSON-serializable: %v", err)}
@@ -276,24 +340,112 @@ func (j *AsyncJobs) Result(ctx context.Context, jobID, taskID string) (*TaskResu
 	return &tr, nil
 }
 
-// jobList is the List response, {"Jobs": [...]}.
-type jobList struct{ Jobs []JobStatus }
+// JobPage is one page of List's result. TotalCount and TotalPages count every
+// job matching the filters; PageSize and PageNumber echo the page served.
+type JobPage struct {
+	Jobs       []JobStatus `json:"Jobs"`
+	TotalCount int         `json:"TotalCount"`
+	PageSize   int         `json:"PageSize"`
+	PageNumber int         `json:"PageNumber"`
+	TotalPages int         `json:"TotalPages"`
+}
 
-func (l *jobList) UnmarshalJSON(data []byte) error {
+// UnmarshalJSON decodes a job page leniently.
+func (p *JobPage) UnmarshalJSON(data []byte) error {
 	return decodeLenient(data, func(f jobFields) {
+		page := JobPage{}
 		for _, s := range f.objects("Jobs") {
-			l.Jobs = append(l.Jobs, jobStatusFrom(s))
+			page.Jobs = append(page.Jobs, jobStatusFrom(s))
 		}
+		page.TotalCount, _ = f.integer("TotalCount")
+		page.PageSize, _ = f.integer("PageSize")
+		page.PageNumber, _ = f.integer("PageNumber")
+		page.TotalPages, _ = f.integer("TotalPages")
+		*p = page
 	})
 }
 
-// List returns every job visible to the caller.
-func (j *AsyncJobs) List(ctx context.Context) ([]JobStatus, error) {
-	var out jobList
-	if err := j.do(ctx, http.MethodGet, "/jobs", nil, &out); err != nil {
+// The sort orders List accepts.
+const (
+	JobSortStartTimeDesc = "start_time_desc" // newest first, the API default
+	JobSortStartTimeAsc  = "start_time_asc"
+)
+
+// maxJobPageSize is the API's largest page.
+const maxJobPageSize = 100
+
+// ListJobsOptions filters and pages List. Every zero field is left to the API's
+// default: page 1, 10 jobs a page, every status, no date bounds, newest first.
+type ListJobsOptions struct {
+	// Page is the 1-based page number.
+	Page int
+	// PageSize is the number of jobs a page, 1 to 100.
+	PageSize int
+	// Status keeps only jobs in that state (one of the JobStatus* values).
+	Status string
+	// StartFrom and StartTo bound the job's start time, inclusive. They are
+	// sent as RFC 3339 in UTC.
+	StartFrom, StartTo time.Time
+	// Sort is JobSortStartTimeDesc or JobSortStartTimeAsc.
+	Sort string
+}
+
+// query validates the options and renders the List query string.
+func (o *ListJobsOptions) query() (string, error) {
+	if o == nil {
+		return "", nil
+	}
+	q := url.Values{}
+	if o.Page < 0 {
+		return "", &ConfigError{Message: fmt.Sprintf("Page must be 1 or more, got %d", o.Page)}
+	} else if o.Page > 0 {
+		q.Set("page", strconv.Itoa(o.Page))
+	}
+	if o.PageSize < 0 || o.PageSize > maxJobPageSize {
+		return "", &ConfigError{Message: fmt.Sprintf("PageSize must be 1 to %d, got %d", maxJobPageSize, o.PageSize)}
+	} else if o.PageSize > 0 {
+		q.Set("page_size", strconv.Itoa(o.PageSize))
+	}
+	if o.Status != "" {
+		if !slices.Contains(jobStatuses, o.Status) {
+			return "", &ConfigError{Message: fmt.Sprintf(
+				"Status %q is not a job status (%s)", o.Status, strings.Join(jobStatuses, ", "))}
+		}
+		q.Set("status", o.Status)
+	}
+	if !o.StartFrom.IsZero() {
+		q.Set("start_from", o.StartFrom.UTC().Format(time.RFC3339))
+	}
+	if !o.StartTo.IsZero() {
+		q.Set("start_to", o.StartTo.UTC().Format(time.RFC3339))
+	}
+	switch o.Sort {
+	case "":
+	case JobSortStartTimeDesc, JobSortStartTimeAsc:
+		q.Set("sort", o.Sort)
+	default:
+		return "", &ConfigError{Message: fmt.Sprintf(
+			"Sort %q is neither %s nor %s", o.Sort, JobSortStartTimeDesc, JobSortStartTimeAsc)}
+	}
+	if len(q) == 0 {
+		return "", nil
+	}
+	return "?" + q.Encode(), nil
+}
+
+// List returns one page of the caller's jobs; opts filters and pages it (nil
+// takes the API's defaults: the 10 most recent jobs). Walk every page with
+// opts.Page from 1 to the returned TotalPages.
+func (j *AsyncJobs) List(ctx context.Context, opts *ListJobsOptions) (*JobPage, error) {
+	query, err := opts.query()
+	if err != nil {
 		return nil, err
 	}
-	return out.Jobs, nil
+	var page JobPage
+	if err := j.do(ctx, http.MethodGet, "/jobs"+query, nil, &page); err != nil {
+		return nil, err
+	}
+	return &page, nil
 }
 
 // Cancel cancels a job by id. Any 2xx is success; the body is ignored.
