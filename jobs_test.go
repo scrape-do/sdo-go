@@ -10,8 +10,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // newJobsClient wires a Client whose async base URL points at a mock server.
@@ -134,10 +136,11 @@ func TestJobsList(t *testing.T) {
 		w.Write([]byte(`{"Jobs":[{"JobID":"job-1","Status":"done"},{"JobID":"job-2","Status":"running"}]}`))
 	})
 
-	jobs, err := c.Jobs().List(context.Background())
+	page, err := c.Jobs().List(context.Background(), nil)
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
+	jobs := page.Jobs
 	if method != http.MethodGet || path != "/api/v1/jobs" {
 		t.Errorf("request line: %s %s", method, path)
 	}
@@ -224,7 +227,7 @@ func TestJobsOperationsSurfaceAPIErrors(t *testing.T) {
 	calls := map[string]func() error{
 		"Status": func() error { _, err := c.Jobs().Status(ctx, "j"); return err },
 		"Result": func() error { _, err := c.Jobs().Result(ctx, "j", "t"); return err },
-		"List":   func() error { _, err := c.Jobs().List(ctx); return err },
+		"List":   func() error { _, err := c.Jobs().List(ctx, nil); return err },
 		"Me":     func() error { _, err := c.Jobs().Me(ctx); return err },
 	}
 	for name, call := range calls {
@@ -298,7 +301,11 @@ func TestJobsLenientDecodingAndBodyShape(t *testing.T) {
 		io.WriteString(w, bodies[r.URL.Path])
 	})
 	ctx := context.Background()
-	list, err := jobs.List(ctx)
+	page, err := jobs.List(ctx, nil)
+	var list []JobStatus
+	if page != nil {
+		list = page.Jobs
+	}
 	if err != nil || len(list) != 1 || list[0].JobID != "a" || list[0].Canceled || len(list[0].Tasks) != 2 || list[0].Tasks[1].TaskID != "t" {
 		t.Errorf("List = %+v, %v", list, err)
 	}
@@ -342,6 +349,116 @@ func TestJobsLenientDecodingAndBodyShape(t *testing.T) {
 		var te *TransportError
 		if !errors.As(err, &te) || te.Message != want {
 			t.Errorf("body %q: got %v, want %q", body, err, want)
+		}
+	}
+}
+
+func TestJobsCreatePlugin(t *testing.T) {
+	var body map[string]any
+	c := newJobsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/jobs" {
+			t.Errorf("request line: %s %s", r.Method, r.URL.Path)
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+		w.Write([]byte(`{"JobID":"job-p","TaskIDs":["t1","t2"]}`))
+	})
+	params := []map[string]any{{"asin": "B0A", "geocode": "us"}, {"asin": "B0B", "geocode": "de"}}
+	job, err := c.Jobs().CreatePlugin(context.Background(), "amazon/pdp", params,
+		map[string]any{"WebhookURL": "https://example.com/hook"})
+	if err != nil || job.JobID != "job-p" || len(job.TaskIDs) != 2 {
+		t.Fatalf("CreatePlugin = %+v, %v", job, err)
+	}
+	plugin, _ := body["Plugin"].(map[string]any)
+	if _, has := body["Targets"]; has || plugin["Key"] != "amazon/pdp" || body["WebhookURL"] != "https://example.com/hook" {
+		t.Errorf("body = %v", body)
+	}
+	if got, _ := plugin["Params"].([]any); len(got) != 2 || got[1].(map[string]any)["asin"] != "B0B" {
+		t.Errorf("Params = %v", plugin["Params"])
+	}
+}
+
+func TestJobsCreatePluginValidation(t *testing.T) {
+	c := newJobsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("an invalid plugin job reached the API")
+	})
+	ctx := context.Background()
+	one := []map[string]any{{"q": "x"}}
+	tooMany := make([]map[string]any, maxPluginParams+1)
+	for i := range tooMany {
+		tooMany[i] = map[string]any{"q": "x"}
+	}
+	cases := map[string]func() error{
+		"bad key":        func() error { _, err := c.Jobs().CreatePlugin(ctx, "amazon", one, nil); return err },
+		"key with query": func() error { _, err := c.Jobs().CreatePlugin(ctx, "amazon/pdp?x=1", one, nil); return err },
+		"no params":      func() error { _, err := c.Jobs().CreatePlugin(ctx, "amazon/pdp", nil, nil); return err },
+		"too many":       func() error { _, err := c.Jobs().CreatePlugin(ctx, "amazon/pdp", tooMany, nil); return err },
+		"nil entry": func() error {
+			_, err := c.Jobs().CreatePlugin(ctx, "amazon/pdp", []map[string]any{nil}, nil)
+			return err
+		},
+		"plugin+targets": func() error {
+			_, err := c.Jobs().CreatePlugin(ctx, "amazon/pdp", one, map[string]any{"targets": []string{"https://e.com"}})
+			return err
+		},
+		"targets+plugin": func() error {
+			_, err := c.Jobs().Create(ctx, []string{"https://e.com"}, map[string]any{"Plugin": map[string]any{}})
+			return err
+		},
+	}
+	for name, call := range cases {
+		var cfg *ConfigError
+		if err := call(); !errors.As(err, &cfg) {
+			t.Errorf("%s: err = %v, want *ConfigError", name, err)
+		}
+	}
+}
+
+func TestJobsListPagingAndFilters(t *testing.T) {
+	var rawQuery string
+	c := newJobsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		rawQuery = r.URL.RawQuery
+		w.Write([]byte(`{"Jobs":[{"JobID":"a","Status":"success","AcquiredConcurrency":2,"LimitConcurrency":3}],` +
+			`"TotalCount":150,"PageSize":25,"PageNumber":2,"TotalPages":6}`))
+	})
+	from := time.Date(2025, 1, 1, 3, 0, 0, 0, time.FixedZone("TRT", 3*3600))
+	page, err := c.Jobs().List(context.Background(), &ListJobsOptions{
+		Page: 2, PageSize: 25, Status: JobStatusSuccess, StartFrom: from,
+		StartTo: time.Date(2025, 1, 31, 23, 59, 59, 0, time.UTC), Sort: JobSortStartTimeAsc,
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	q, _ := url.ParseQuery(rawQuery)
+	want := map[string]string{"page": "2", "page_size": "25", "status": "success",
+		"start_from": "2025-01-01T00:00:00Z", "start_to": "2025-01-31T23:59:59Z", "sort": "start_time_asc"}
+	for k, v := range want {
+		if q.Get(k) != v {
+			t.Errorf("query %s = %q, want %q (raw %q)", k, q.Get(k), v, rawQuery)
+		}
+	}
+	if page.TotalCount != 150 || page.PageSize != 25 || page.PageNumber != 2 || page.TotalPages != 6 ||
+		len(page.Jobs) != 1 || page.Jobs[0].AcquiredConcurrency != 2 || page.Jobs[0].LimitConcurrency != 3 {
+		t.Errorf("page = %+v", page)
+	}
+	if _, err := c.Jobs().List(context.Background(), &ListJobsOptions{}); err != nil || rawQuery != "" {
+		t.Errorf("empty options: query %q, err %v", rawQuery, err)
+	}
+}
+
+func TestJobsListRejectsInvalidOptions(t *testing.T) {
+	c := newJobsClient(t, func(w http.ResponseWriter, r *http.Request) {
+		t.Error("an invalid List call reached the API")
+	})
+	for name, o := range map[string]*ListJobsOptions{
+		"negative page":   {Page: -1},
+		"page size 0..":   {PageSize: -1},
+		"page size > 100": {PageSize: 101},
+		"unknown status":  {Status: "done"},
+		"unknown sort":    {Sort: "newest"},
+	} {
+		var cfg *ConfigError
+		if _, err := c.Jobs().List(context.Background(), o); !errors.As(err, &cfg) {
+			t.Errorf("%s: err = %v, want *ConfigError", name, err)
 		}
 	}
 }

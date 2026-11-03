@@ -5,6 +5,26 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 ## [Unreleased]
 
+### Added
+
+- `AsyncJobs.CreatePlugin(ctx, key, params, options)`: plugin jobs on the
+  async API (`{"Plugin": {"Key": ..., "Params": [...]}}`), one task per
+  params entry, 1 to 1000 entries. A malformed key, an empty or oversized
+  list, or options that set `Targets` or `Plugin` is a `*ConfigError`.
+- `ListJobsOptions` (page, page size 1-100, status, start-time range, sort)
+  and `JobPage` (`Jobs`, `TotalCount`, `PageSize`, `PageNumber`,
+  `TotalPages`) for the paginated job list; `JobStatus*` and `JobSort*`
+  constants for the documented values.
+- `JobStatus.AcquiredConcurrency` and `JobStatus.LimitConcurrency`.
+
+### Changed
+
+- **Breaking:** `AsyncJobs.List(ctx)` is now `List(ctx, opts)` and returns a
+  `*JobPage`. The endpoint is paginated (10 jobs a page by default), so the
+  old signature silently returned only the first page while documenting
+  "every visible job". Pass `nil` for the API's defaults and read `.Jobs`.
+- `Create` also refuses options that set `Plugin`.
+
 ### Security
 
 - Dependency: `golang.org/x/net` v0.62.0. Below it, the HTML parser's
