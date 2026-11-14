@@ -1,7 +1,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # sdo — Go SDK for Scrape.do
 
-The official Go SDK for the [Scrape.do](https://scrape.do) web-scraping API.
+[![ci](https://github.com/scrape-do/sdo-go/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/scrape-do/sdo-go/actions/workflows/ci.yml) [![security](https://github.com/scrape-do/sdo-go/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/scrape-do/sdo-go/actions/workflows/security.yml) [![license](https://img.shields.io/github/license/scrape-do/sdo-go)](LICENSE) [![Go Reference](https://pkg.go.dev/badge/github.com/scrape-do/sdo-go.svg)](https://pkg.go.dev/github.com/scrape-do/sdo-go)
+
+The official Go SDK for the [Scrape.do](https://scrape.do) web scraping API.
 Token-only auth, transparent compression, a typed result, and a generic plugin
 core — no telemetry, no UI.
 
@@ -43,7 +45,7 @@ func main() {
 }
 ```
 
-Go 1.26 or newer is required.
+Go 1.26.9 or newer is required.
 
 ## Method, body and headers
 
@@ -98,7 +100,7 @@ failures return an error.
 status 400 or above that carries a positive cost is the target's own answer
 (its 400, 401, 403, 422, ...): a `*Result`, never retried. Without one, the
 status keeps its gateway meaning: the gateway's own 400 (a parameter it
-rejected, such as `render=mert`) is `KindValidation`, its 401 (a refused token,
+rejected, such as `render=maybe`) is `KindValidation`, its 401 (a refused token,
 no credits) `KindAuth`, and so on. `APIError.Billed` follows the cost header
 when it is present (0 is not billed) and the documented status table
 otherwise; `APIError.Cost()` and `Result.Cost()` return the header:
@@ -154,7 +156,7 @@ fine) and must otherwise be visible ASCII. `SDO_TIMEOUT` is a decimal number of
 seconds, at least `0.001` (`30`, `1.5`). Base URLs must be `https` — the token
 travels with every request — except for `localhost`, `127.0.0.1` and `::1`;
 `sdo.WithAllowInsecureHTTP()` lifts that for other hosts. A base URL may carry
-a path prefix (`https://gw.example/pfx`), but no query, fragment or
+a path prefix (`https://scraper.example.com/pfx`), but no query, fragment or
 credentials. Invalid values are a `*sdo.ConfigError` from `New`. Redirects are
 never followed, even with your own `WithHTTPClient`.
 
@@ -229,8 +231,10 @@ minute). An unknown token is answered with a 502 "authentication refused".
 
 Asynchronous scraping is the REST job API on `https://q.scrape.do`, reached via
 `client.Jobs()`. Every request authenticates with the `X-Token` header (never a
-`token=` query) and returns typed values. The `callback` option was removed —
-poll a job's status and pull each task's result instead.
+`token=` query) and returns typed values. `ScrapeConfig` has no field for the
+synchronous API's deprecated `callback` parameter: to be notified when a job
+finishes, set the job option `WebhookURL`, or poll a job's status and pull each
+task's result.
 
 ```go
 jobs := client.Jobs()
@@ -277,16 +281,12 @@ sent. The async API runs on its own concurrency pool (30% of the plan's limit,
 not taken from the main API's); `JobStatus.AcquiredConcurrency` and
 `LimitConcurrency` report a job's share of it.
 
-## CI/CD workflows
+## Releases
 
-| Workflow | Runs on | What it does |
-|----------|---------|--------------|
-| `ci.yml` | every push to `main` and every pull request | `go vet` and the race-enabled test suite on Go 1.26 and 1.27 (Linux), plus macOS and Windows on 1.27, including the cross-language conformance suite and its integrity check; a `quality` job for `gofmt` and the 99% statement-coverage floor; `govulncheck`; the public-API snapshot (`api-surface.txt`) must be up to date; CodeQL code scanning. Everything runs on GitHub-hosted runners; CodeQL runs on the org's self-hosted runners for same-repository events (its upload is a GitHub API call the org's IP allow list only accepts from there); a pull request from a fork is analysed once merged. |
-| `security.yml` | push to `main`, pull requests, and weekly | secret scanning over the full git history (gitleaks), OSV-Scanner over `go.mod`/`go.sum`, and an SBOM uploaded as a build artifact. OpenSSF Scorecard runs on pushes to `main` and weekly, with results in code scanning. |
-| `tag.yml` | a version tag only | A Go module is published by its tag (the module proxy fetches it), so there is no publish job. This workflow checks that the tag is `vX.Y.Z` or `vX.Y.Z-rc.N`, is on `main`, and matches `version.go`. A `-rc.N` tag is a Go pre-release, so `@latest` never selects it. |
-| Dependabot | weekly | update pull requests for Go modules and the GitHub Actions, taken only after a 7-day cooldown; each one runs the checks above. |
-
-Every action is pinned to a full commit SHA and every job declares least-privilege `permissions:`. Publishing never happens outside the `scrape-do` organisation, never from a commit that is not on `main`, and never without a maintainer's approval.
+A release is a version tag that a maintainer pushes from `main` only;
+`tag.yml` checks each tag's format, that it is on `main`, and that it matches
+`version.go`. The CI workflows are described in
+[CONTRIBUTING.md](CONTRIBUTING.md#ci-workflows).
 
 ## Responsible use
 
@@ -294,6 +294,10 @@ You are responsible for complying with the terms of service, `robots.txt`, and
 applicable laws of any site you scrape. Third-party names are trademarks of their
 respective owners; Scrape.do is not affiliated with them.
 
-## License
+## Documentation, support and security
 
-[Apache-2.0](LICENSE).
+- API documentation: https://scrape.do/documentation
+- Package reference: https://pkg.go.dev/github.com/scrape-do/sdo-go
+- Bugs and feature requests for this repository: [GitHub Issues](https://github.com/scrape-do/sdo-go/issues). Account, billing and API questions: support@scrape.do.
+- Security issues: see [SECURITY.md](SECURITY.md). Never post an API token in an issue.
+- [CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md) · [MIGRATING.md](MIGRATING.md) · [Apache-2.0](LICENSE)
