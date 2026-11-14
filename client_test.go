@@ -342,14 +342,14 @@ func TestTarget404And410AreResults(t *testing.T) {
 	}
 }
 
-// The gateway answers a parameter it cannot parse (render=mert) before it
+// The gateway answers a parameter it cannot parse (render=maybe) before it
 // authorizes the request: a 400 with its JSON envelope and no
 // Scrape.do-Request-Cost. That is an unbilled validation error carrying the
 // gateway's message. A 400 the target answered is billed (a positive cost) and
 // is the target's page.
 func TestGateway400VersusTarget400(t *testing.T) {
 	gw, _ := newClient(t, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Get("render") != "mert" {
+		if r.URL.Query().Get("render") != "maybe" {
 			t.Errorf("render = %q", r.URL.Query().Get("render"))
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -358,7 +358,7 @@ func TestGateway400VersusTarget400(t *testing.T) {
 		w.Write([]byte(`{"URL":"https://e.com","StatusCode":400,"Message":["'Render' parameter should boolean."],` +
 			`"PossibleCauses":["Please check your request."],"Contact":"Please don't hesitate to contact with us via support@scrape.do."}`))
 	}, WithRetries(2))
-	_, err := gw.Scrape(context.Background(), &ScrapeConfig{URL: "https://e.com", ExtraParams: map[string]string{"render": "mert"}})
+	_, err := gw.Scrape(context.Background(), &ScrapeConfig{URL: "https://e.com", ExtraParams: map[string]string{"render": "maybe"}})
 	var apiErr *APIError
 	if !errors.As(err, &apiErr) || !apiErr.IsValidation() || apiErr.Billed || apiErr.IsRetryable ||
 		apiErr.Message != "'Render' parameter should boolean." {

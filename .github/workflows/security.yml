@@ -60,6 +60,22 @@ jobs:
           scan-args: |-
             --lockfile=./go.mod
 
+  # Checks the dependencies and the standard library against Go's vulnerability
+  # database (vuln.go.dev), reporting what the module's code can reach.
+  govulncheck:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: stable # the newest standard library
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 # pinned: @latest reintroduces the supply-chain hole SHA-pinning closes
+      - run: govulncheck ./...
+
   # Software Bill of Materials (syft), uploaded as a build artifact.
   sbom:
     runs-on: ubuntu-latest
@@ -95,7 +111,7 @@ jobs:
       # directory (CodeQL writes its PR diff range there); reclaim both.
       - name: Reclaim the workspace
         working-directory: ${{ github.workspace }}
-        run: docker run --rm -v "$PWD:/w" -v "$RUNNER_TEMP:/t" golang:1.27 chown -R "$(id -u):$(id -g)" /w /t
+        run: docker run --rm -v "$PWD:/w" -v "$RUNNER_TEMP:/t" busybox:1.37.0@sha256:66a6306db78bf2dbf3487f293aa8d6990d8e506fdffab9cc43fe422becf886e4 chown -R "$(id -u):$(id -g)" /w /t
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false

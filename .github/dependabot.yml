@@ -15,6 +15,10 @@ updates:
     groups:
       go-modules:
         patterns: ["*"]
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: ["dependencies"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -25,3 +29,7 @@ updates:
     groups:
       github-actions:
         patterns: ["*"]
+    commit-message:
+      prefix: chore
+      include: scope
+    labels: ["dependencies"]

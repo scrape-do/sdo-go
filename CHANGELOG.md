@@ -3,6 +3,14 @@
 
 Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semver.org/).
 
+Before 1.0, a minor version may contain breaking changes; each is marked **Breaking** and described in MIGRATING.md. Patch versions never break.
+
+## [Unreleased]
+
+### Fixed
+
+- The postal-code option is sent as the documented `zipcode` query parameter (it was sent as `zipCode`).
+
 ## [0.2.0] - 2026-11-03
 
 ### Added
@@ -23,7 +31,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
   `*JobPage`. The endpoint is paginated (10 jobs a page by default), so the
   old signature silently returned only the first page while documenting
   "every visible job". Pass `nil` for the API's defaults and read `.Jobs`.
-- `Create` also refuses options that set `Plugin`.
+- **Breaking:** `Create` also refuses options that set `Plugin` (a
+  `*ConfigError`); submit a plugin job with `CreatePlugin`.
 
 ### Security
 
@@ -34,7 +43,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 ## [0.1.0] - 2026-11-01
 
 The first release of the Go SDK (`github.com/scrape-do/sdo-go`, package `sdo`).
-It requires Go 1.26 or newer.
+It requires Go 1.26.9 or newer.
 
 ### Added
 
@@ -51,6 +60,12 @@ It requires Go 1.26 or newer.
   `Client.Do(ctx, *ScrapeConfig, *Request)` for any method with a body
   (`Request.JSON` or `Request.Data`) and headers. `ScrapeConfig` covers the
   documented gateway parameters with an `ExtraParams` escape hatch.
+  `ScrapeConfig.BlockResources` is a `*bool`: `nil` sends nothing, so the
+  gateway applies its default of `true` (resources blocked); `sdo.Bool(false)`
+  sends `blockResources=false` to load resources; `sdo.Bool(true)` sends
+  `blockResources=true` and, being render-only, requires rendering. The helper
+  `sdo.Bool` takes the address of a bool literal for this field. `PureCookies`
+  returns the target's `Set-Cookie` header instead of `Scrape.do-Cookies`.
 - **Validation before any request** (`*ConfigError`): enum values matched
   case-insensitively (ASCII) and sent lowercase; millisecond ranges for
   `Timeout` (5000–120000), `RetryTimeout` (5000–55000) and `CustomWait`
@@ -60,12 +75,24 @@ It requires Go 1.26 or newer.
   target URL must be an absolute `http(s)` URL with a host and a valid port, with
   no whitespace, control character or backslash (it is sent exactly as given);
   request headers must be RFC 9110 tokens with printable-ASCII values, and
-  `Host`, `Content-Length`, `Transfer-Encoding` and `Connection` cannot be set.
+  `Host`, `Content-Length`, `Transfer-Encoding` and `Connection` cannot be set;
+  `Do` refuses a rendered request (`Render`, or `RenderMode` "true") with any
+  method other than GET, which the gateway answers with a 400 ("JavaScript
+  Render feature just works with 'GET' method type"). The documented parameter
+  rules the gateway rejects with a 400 or documents as invalid are checked too:
+  `ShowFrames`, `ShowWebsocketRequests` and the screenshot fields require
+  `ReturnJSON`; at most one screenshot field; `ParticularScreenshot` excludes
+  `PlayWithBrowser`; `RegionalGeoCode` requires `SuperProxy` and excludes
+  `GeoCode`; `ZipCode` requires `SuperProxy` and `GeoCode`; `SessionID` must be
+  an integer 0–1000000; `RetryTimeout` excludes rendering; at most one of
+  `CustomHeaders`, `ExtraHeaders`, `ForwardHeaders`; `Height` and `Width`
+  require rendering. `ReturnJSON` without rendering is valid (the gateway wraps
+  the plain response in JSON).
 - **Wire format** identical to the other Scrape.do SDKs: RFC 3986 query
-  encoding (space is `%20`), typed params in spec order then `ExtraParams`
-  sorted, zero values omitted, and one canonical JSON encoding (sorted keys, no
-  HTML escaping, ECMAScript numbers) for JSON params, JSON bodies and the job
-  body. Header names compare case-insensitively and a caller's value replaces
+  encoding (space is `%20`), typed params in a fixed order shared by every
+  SDK, then `ExtraParams` sorted, zero values omitted, and one canonical JSON
+  encoding (sorted keys, no HTML escaping, ECMAScript numbers) for JSON
+  params, JSON bodies and the job body. Header names compare case-insensitively and a caller's value replaces
   the SDK's own `User-Agent` or `Accept-Encoding`.
 - **`Result`**: `Bytes()`, `Text()` (the WHATWG Encoding Standard decode: BOM,
   `charset`, JSON as UTF-8, `<meta>` for HTML, then UTF-8; GBK and gb18030 per
@@ -97,7 +124,9 @@ It requires Go 1.26 or newer.
   any response the target produced itself are a `*Result`. So is any status
   of 400 or above the gateway billed (a positive `Scrape.do-Request-Cost`, the
   authoritative figure): the target's own 400, 401, 403, 422, .... Without a
-  positive cost a status keeps its gateway meaning. `Billed` follows the cost
+  positive cost a status keeps its gateway meaning: the gateway's own 400 (a
+  parameter it rejected, such as `render=maybe`) is `KindValidation` and its
+  401 `KindAuth`, both with `Billed` false. `Billed` follows the cost
   header when present, else the documented table; `APIError.Cost()` returns
   the header, read like `Result.Cost()` (one value, ASCII digits, at most
   2^53-1). There is no 402/quota kind: an exhausted balance is a 401
@@ -107,7 +136,10 @@ It requires Go 1.26 or newer.
   only on 429. A failure before anything was sent (DNS, connect, TLS) is retried
   for idempotent methods; a failure after the request was sent (a read timeout,
   a dropped connection, a body that cannot be read or decoded, an oversized
-  body) is never retried. A negative retry count is treated as 0.
+  body) is never retried. A negative retry count is treated as 0. A 510 is not
+  retried: the gateway answers it only when the client cancelled the request
+  before it finished, so it is not an upstream failure; its default message is
+  "The request was canceled by the HTTP client (HTTP 510)."
 - **Timeouts**: the client timeout (70 s by default: the gateway's 60 s
   default plus 10 s) covers one whole attempt. When a `ScrapeConfig` sets the
   gateway `Timeout`, or a plugin call a `timeout` param, that request's
@@ -138,60 +170,6 @@ It requires Go 1.26 or newer.
   `TaskResult.ContentBytes()` decodes base64 content. Job API errors are never
   billed.
 
-### Changed
-
-- `Do` refuses a rendered request (`Render`, or `RenderMode` "true")
-  with any method other than GET with a `*ConfigError`, before anything is
-  sent. The gateway answers such a request with a 400 ("JavaScript Render
-  feature just works with 'GET' method type").
-
-- **BREAKING.** `ScrapeConfig.BlockResources` is now `*bool` (was
-  `bool`), so the field is tri-state. `nil` is unset and sends nothing, letting
-  the gateway apply its default of `true` (resources blocked). `sdo.Bool(false)`
-  now sends `blockResources=false` explicitly to *load* resources — this was
-  impossible before, because a zero `false` was indistinguishable from unset and
-  omitted, leaving resources wrongly blocked by the gateway default.
-  `sdo.Bool(true)` sends `blockResources=true` and, being render-only, still
-  requires rendering; `sdo.Bool(false)` does not. The new helper `sdo.Bool`
-  takes the address of a bool literal for this field.
-- **Behavior change.** `Scrape.do-Request-Cost` decides origin and billing.
-  Any response of status 400 or above with a positive cost is the target's
-  answer the gateway billed (its 400, 401, 403, 422, ...) and is now a
-  `*Result`, like a target 404/410, and is never retried. The gateway's own
-  errors carry no cost (or 0) and keep their kinds: its 400 (a parameter it
-  rejected, such as `render=mert`) is `KindValidation`, its 401 `KindAuth`, both
-  with `Billed` false — a 400 is no longer always billed. `Billed` follows the
-  cost header when present and the documented status table otherwise. New
-  `APIError.Cost()`. Code that caught every 4xx as an error should check
-  `res.StatusCode` too.
-- The error envelope's `Message` key is matched in any letter case, and an
-  `error` key (any case) is the fallback, so plugin parameter errors
-  (`{"error": "invalid_zipcode", "message": "..."}`) surface their message
-  instead of the default.
-- **Behavior change.** More documented parameter rules are checked before any
-  request (`*ConfigError`), each one the gateway rejects with a 400 or documents
-  as invalid: `ShowFrames`, `ShowWebsocketRequests` and the screenshot fields
-  require `ReturnJSON`; at most one screenshot field; `ParticularScreenshot`
-  excludes `PlayWithBrowser`; `RegionalGeoCode` requires `SuperProxy` and
-  excludes `GeoCode`; `ZipCode` requires `SuperProxy` and `GeoCode`;
-  `SessionID` must be an integer 0–1000000; `RetryTimeout` excludes rendering;
-  at most one of `CustomHeaders`, `ExtraHeaders`, `ForwardHeaders`; `Height`
-  and `Width` require rendering. `ReturnJSON` without rendering stays valid
-  (the gateway wraps the plain response in JSON).
-- **Behavior change.** A 510 is no longer retried and its default message is
-  "The request was canceled by the HTTP client (HTTP 510)." The gateway answers
-  510 only when the client cancelled the request before it finished; it is not
-  an upstream failure.
-- Field docs corrected: `PureCookies` returns the target's `Set-Cookie` header
-  instead of `Scrape.do-Cookies` (the body is unchanged); `ReturnJSON` returns
-  network requests and content as JSON; `RegionalGeoCode` does not
-  override `GeoCode` (the two are mutually exclusive).
-- **Behavior change.** The default client timeout is 70 s (was 60 s): the
-  gateway's default `timeout` is 60 s, so a 60 s client deadline could give up
-  just before the gateway's answer arrived. An explicit `WithTimeout` or
-  `SDO_TIMEOUT` keeps its meaning. A plugin call whose `timeout` param is a
-  positive integer now gets the same 10 s margin as `ScrapeConfig.Timeout`.
-
 ### Security
 
 - The token only travels over https, except to `localhost`, `127.0.0.1` and
@@ -211,11 +189,16 @@ It requires Go 1.26 or newer.
 - A body is decoded through at most five `Content-Encoding` codings (urllib3's
   limit); a longer chain is a `*TransportError`, never retried, so a target
   cannot make the SDK stack a decoder per listed coding.
-- CI: every job runs on GitHub-hosted runners, so code from a pull request
-  never reaches the org's persistent self-hosted runners (only CodeQL runs
-  there, for same-repository events; a fork's pull request is analysed once
-  merged); every checkout drops its token
+- CI: code from a fork's pull request never reaches the organisation's
+  persistent self-hosted runners: every job runs on GitHub-hosted runners
+  except CodeQL (same-repository events only; a fork's pull request is
+  analysed once merged) and Scorecard (never on a pull request); every
+  checkout drops its token
   (`persist-credentials: false`); and gitleaks scans with a config and ignore
   list from the workflow, so a pull request cannot allowlist its own secret with
   a `.gitleaks.toml` or `.gitleaksignore`.
 - The User-Agent is exactly `sdo-sdk-go/<version>`; the SDK sends no telemetry.
+
+[Unreleased]: https://github.com/scrape-do/sdo-go/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/scrape-do/sdo-go/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/scrape-do/sdo-go/releases/tag/v0.1.0
