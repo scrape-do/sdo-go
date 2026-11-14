@@ -275,7 +275,7 @@ func isErrorResponse(o outgoing, status int, header http.Header) bool {
 // it the target's answer whatever its status. The gateway charges the target
 // statuses it counts as delivered (400, 401, 404, 405 and more) and states the
 // charge in Scrape.do-Request-Cost; its own errors — a parameter it could not
-// parse (render=mert), a refused token, a blocked URL — are written before any
+// parse (render=maybe), a refused token, a blocked URL — are written before any
 // cost is known and carry no cost header, and a failed fetch carries a cost of
 // 0. So a positive cost means the target answered, and such a response is
 // never retried: it was billed. Without a readable positive cost the status
