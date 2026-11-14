@@ -31,7 +31,8 @@ Before 1.0, a minor version may contain breaking changes; each is marked **Break
   `*JobPage`. The endpoint is paginated (10 jobs a page by default), so the
   old signature silently returned only the first page while documenting
   "every visible job". Pass `nil` for the API's defaults and read `.Jobs`.
-- `Create` also refuses options that set `Plugin`.
+- **Breaking:** `Create` also refuses options that set `Plugin` (a
+  `*ConfigError`); submit a plugin job with `CreatePlugin`.
 
 ### Security
 
