@@ -388,7 +388,7 @@ func setField(t *testing.T, cfg *ScrapeConfig, name string, value any) {
 		f.SetInt(int64(value.(float64)))
 	case reflect.Slice:
 		arr := value.([]any)
-		if f.Type().Elem().Kind() == reflect.String { // JSExecute []string
+		if f.Type().Elem().Kind() == reflect.String { // a []string field
 			out := make([]string, len(arr))
 			for i, v := range arr {
 				out[i] = v.(string)
