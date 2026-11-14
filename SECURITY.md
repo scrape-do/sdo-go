@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 # Security Policy
 
 `sdo` (module `github.com/scrape-do/sdo-go`, package `sdo`) is the official Go
@@ -73,12 +74,11 @@ In scope:
 
 Out of scope:
 
-- Vulnerabilities in the Scrape.do API service itself — report those through
-  Scrape.do's main responsible-disclosure channel, not this repo.
+- Vulnerabilities in the Scrape.do API service — email security@scrape.do and
+  say the issue is in the Scrape.do service itself rather than in this
+  repository.
 - Issues that require a pre-compromised local machine, a malicious local
   environment the attacker already controls, or physical access.
-- Findings against internal build/spec tooling that is not distributed in this
-  module.
 
 ## No-Telemetry Posture
 
@@ -102,8 +102,8 @@ minors. Upgrade to the latest minor to receive security updates.
 | Any older minor        | :x:                |
 
 If you are pinned to an older minor, the remediation for a reported vulnerability
-is to upgrade to the patched latest minor (`go get -u
-github.com/scrape-do/sdo-go`).
+is to upgrade to the patched latest minor
+(`go get github.com/scrape-do/sdo-go@latest`).
 
 ## Triage SLA
 
@@ -138,8 +138,8 @@ We coordinate disclosure through GitHub's advisory system:
    **CVE ID** through the advisory. The CVE is linked to the GHSA.
 5. **Release.** We publish a patched release of the latest minor (a new Git tag),
    reference the advisory in the changelog, and retract affected versions with
-   `retract` directives in `go.mod` plus a `GODEBUG`/`go list -retracted`
-   advisory where applicable.
+   `retract` directives in `go.mod` plus a `go list -retracted` advisory where
+   applicable.
 6. **Publish.** We publish the GHSA — which propagates the CVE to the GitHub
    Advisory Database and the Go vulnerability database (`vuln.go.dev`) — so users
    running `govulncheck` and dependency scanners are alerted automatically.
