@@ -483,7 +483,7 @@ func (c *ScrapeConfig) toParams() ([]param, error) {
 	addBool("disableRetry", c.DisableRetry)
 	addStr("geoCode", c.GeoCode)
 	addStr("regionalGeoCode", c.RegionalGeoCode)
-	addStr("zipCode", c.ZipCode)
+	addStr("zipcode", c.ZipCode)
 	addStr("sessionId", c.SessionID)
 	addStr("setCookies", c.SetCookies)
 	addBool("customHeaders", c.CustomHeaders)
