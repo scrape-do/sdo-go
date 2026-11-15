@@ -134,7 +134,7 @@ This appends:
 Signed-off-by: Your Name <you@example.com>
 ```
 
-Make sure `git config user.name` and `git config user.email` are your real identity. The `commits` CI job fails the pull request when a commit lacks a `Signed-off-by` trailer or a Conventional Commit subject. To sign off a commit you already made:
+Make sure `git config user.name` and `git config user.email` are your real identity. The `commits` CI job fails the pull request when a commit lacks a `Signed-off-by` trailer or a Conventional Commit subject, or when the pull request title, which becomes the squash commit's subject, is not a Conventional Commit subject. To sign off a commit you already made:
 
 ```sh
 git commit --amend -s --no-edit
@@ -175,7 +175,8 @@ If something here is unclear, open an issue rather than guessing. We'd rather an
 
 | Workflow | Runs on | What it does |
 |----------|---------|--------------|
-| `ci.yml` | every push to `main` and every pull request | `go vet` and the race-enabled test suite on Go 1.26 and 1.27 (Linux), plus macOS and Windows on 1.27, including the cross-language conformance suite and its integrity check; a `quality` job for `gofmt` and the 99% statement-coverage floor; the public-API snapshot (`api-surface.txt`) must be up to date; on pull requests, a `commits` job checks every commit's subject and sign-off; CodeQL code scanning. |
+| `ci.yml` | every push to `main` and every pull request | `go vet` and the race-enabled test suite on Go 1.26 and 1.27 (Linux), plus macOS and Windows on 1.27, including the cross-language conformance suite and its integrity check; a `quality` job for `gofmt` and the 99% statement-coverage floor; the public-API snapshot (`api-surface.txt`) must be up to date; CodeQL code scanning. |
+| `commits.yml` | every pull request: opened, updated, reopened, or its title or description edited | the `commits` job checks every commit's subject and sign-off and the pull request title, which becomes the squash commit's subject. A workflow of its own, so editing a pull request re-runs only this check. |
 | `security.yml` | push to `main`, pull requests, and weekly | secret scanning over the full git history (gitleaks), OSV-Scanner over `go.mod`, `govulncheck`, and an SBOM uploaded as a build artifact. OpenSSF Scorecard runs on pushes to `main` and weekly, with results in code scanning. |
 | `tag.yml` | a version tag only | A Go module is published by its tag (the module proxy fetches it), so there is no publish job. This workflow checks that the tag is `vX.Y.Z` or `vX.Y.Z-rc.N`, is on `main`, and matches `version.go`. A `-rc.N` tag is a Go pre-release, so `@latest` never selects it. |
 | Dependabot | weekly | update pull requests for Go modules and the GitHub Actions, taken only after a 7-day cooldown; each one runs the checks above. |
