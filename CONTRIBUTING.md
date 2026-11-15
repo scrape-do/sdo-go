@@ -3,7 +3,7 @@
 
 Thanks for your interest in improving `sdo-go`, the official Go SDK for Scrape.do (`github.com/scrape-do/sdo-go`). This document is the contract for how changes land here. Read it before opening a pull request.
 
-`sdo-go` is one of several language SDKs (`sdo-sdk-python`, `sdo-sdk-js`, `sdo-go`) plus a CLI (`sdo-cli`, which ships the `sdo` binary and bundles the MCP server via `sdo mcp serve`). The request parameters, defaults and observable behaviour are shared by all sdo SDKs and pinned by the conformance corpus (`conformance.json`), which Scrape.do maintains against https://scrape.do/documentation. Propose a change in an issue first; a change to a parameter lands in every SDK together.
+`sdo-go` is one of several language SDKs (`sdo-sdk-python`, `sdo-sdk-js`, `sdo-go`) plus a CLI (`sdo-cli`, which ships the `sdo` binary and bundles the MCP server via `sdo mcp serve`) and a standalone MCP server (`sdo-mcp`). The request parameters, defaults and observable behaviour are shared by all sdo SDKs and pinned by the conformance corpus (`conformance.json`), which Scrape.do maintains against https://scrape.do/documentation. Propose a change in an issue first; a change to a parameter lands in every SDK together.
 
 ## Ground rules
 
@@ -134,7 +134,7 @@ This appends:
 Signed-off-by: Your Name <you@example.com>
 ```
 
-Make sure `git config user.name` and `git config user.email` are your real identity. The `commits` CI job fails the pull request when a commit lacks a `Signed-off-by` trailer or a Conventional Commit subject. To sign off a commit you already made:
+Make sure `git config user.name` and `git config user.email` are your real identity. The `commits` CI job fails the pull request when a commit lacks a `Signed-off-by` trailer or a Conventional Commit subject, or when the pull request title, which becomes the squash commit's subject, is not a Conventional Commit subject. To sign off a commit you already made:
 
 ```sh
 git commit --amend -s --no-edit
@@ -175,24 +175,42 @@ If something here is unclear, open an issue rather than guessing. We'd rather an
 
 | Workflow | Runs on | What it does |
 |----------|---------|--------------|
-| `ci.yml` | every push to `main` and every pull request | `go vet` and the race-enabled test suite on Go 1.26 and 1.27 (Linux), plus macOS and Windows on 1.27, including the cross-language conformance suite and its integrity check; a `quality` job for `gofmt` and the 99% statement-coverage floor; the public-API snapshot (`api-surface.txt`) must be up to date; on pull requests, a `commits` job checks every commit's subject and sign-off; CodeQL code scanning. |
+| `ci.yml` | every push to `main` and every pull request | `go vet` and the race-enabled test suite on Go 1.26 and 1.27 (Linux), plus macOS and Windows on 1.27, including the cross-language conformance suite and its integrity check; a `quality` job for `gofmt`, a test run under hostile `SDO_*` settings (the suite must not depend on the environment), the 99% statement-coverage floor and actionlint; the public-API snapshot (`api-surface.txt`) must be up to date; CodeQL code scanning. |
+| `commits.yml` | every pull request: opened, updated, reopened, or its title or description edited | the `commits` job checks every commit's subject and sign-off and the pull request title, which becomes the squash commit's subject. A workflow of its own, so editing a pull request re-runs only this check. |
 | `security.yml` | push to `main`, pull requests, and weekly | secret scanning over the full git history (gitleaks), OSV-Scanner over `go.mod`, `govulncheck`, and an SBOM uploaded as a build artifact. OpenSSF Scorecard runs on pushes to `main` and weekly, with results in code scanning. |
-| `tag.yml` | a version tag only | A Go module is published by its tag (the module proxy fetches it), so there is no publish job. This workflow checks that the tag is `vX.Y.Z` or `vX.Y.Z-rc.N`, is on `main`, and matches `version.go`. A `-rc.N` tag is a Go pre-release, so `@latest` never selects it. |
+| `tag.yml` | a version tag only | A Go module is published by its tag (the module proxy fetches it), so there is no publish job. This workflow checks that the tag is `vX.Y.Z` or `vX.Y.Z-rc.N`, is on `main`, and matches `version.go`. A `-rc.N` tag is a Go pre-release, so `@latest` never selects it. Once the checks pass, the `github-release` job creates the tag's GitHub Release with the version's CHANGELOG.md section as its notes (a pre-release for `-rc.N`), and skips a tag that already has one. |
 | Dependabot | weekly | update pull requests for Go modules and the GitHub Actions, taken only after a 7-day cooldown; each one runs the checks above. |
 
-Every job runs on GitHub-hosted runners except CodeQL and Scorecard, which run on the organisation's self-hosted runners: both call the GitHub API (CodeQL to upload its results, Scorecard to read the repository), and the organisation's IP allow list only accepts those calls from there. CodeQL runs there for same-repository events only, so a pull request from a fork is analysed once merged; Scorecard never runs on a pull request. Every action is pinned to a full commit SHA and every job declares least-privilege `permissions:`.
+Every job runs on GitHub-hosted runners except CodeQL, Scorecard and `tag.yml`'s `github-release`, which run on the organisation's self-hosted runners: all three call the GitHub API (CodeQL to upload its results, Scorecard to read the repository, `github-release` to create the release), and the organisation's IP allow list only accepts those calls from there. CodeQL runs there for same-repository events only, so a pull request from a fork is analysed once merged; Scorecard never runs on a pull request, and `github-release` only for a version tag that passed the checks. Every action is pinned to a full commit SHA and every job declares least-privilege `permissions:`.
 
 ## Releasing
 
 Development is trunk-based: every change lands on `main` through a pull request
 with CI green. A Go module is published by its tag — the module proxy fetches it
 on first request, and a published tag can never be moved or deleted (a bad one
-is retracted in `go.mod` and superseded by a higher tag). So `version.go` is
-bumped in a pull request first, then the tag is pushed on that `main` commit:
+is retracted in `go.mod` and superseded by a higher tag). So a release goes in
+this order:
 
-- `vX.Y.Z-rc.N` — a release candidate (`Version = "X.Y.Z-rc.N"`); Go treats it as a
-  pre-release, so `go get …@latest` never selects it.
-- `vX.Y.Z` — a release (`Version = "X.Y.Z"`).
+1. In one pull request, bump `Version` in `version.go`. For a final release,
+   also move the `[Unreleased]` entries of CHANGELOG.md under a new
+   `## [X.Y.Z] - YYYY-MM-DD` heading (the day you will push the tag), leave an
+   empty `## [Unreleased]` above it, and update the link definitions at the end
+   of the file: `[Unreleased]` compares `vX.Y.Z...HEAD`, and a new `[X.Y.Z]`
+   line compares the previous tag with `vX.Y.Z`. A release candidate keeps its
+   changes under `[Unreleased]`.
+2. Once that pull request is merged, push the tag on its `main` commit:
+   - `vX.Y.Z-rc.N` — a release candidate (`Version = "X.Y.Z-rc.N"`); Go treats it as a
+     pre-release, so `go get …@latest` never selects it.
+   - `vX.Y.Z` — a release (`Version = "X.Y.Z"`).
+3. Watch the tag's `tag` workflow run: it checks the tag and creates the
+   GitHub Release (below).
 
 `.github/workflows/tag.yml` fails when a tag is malformed, not on `main`, or does
 not match `version.go` — it cannot un-publish, but it tells you immediately.
+
+When the tag passes, the workflow's `github-release` job creates its GitHub
+Release, titled with the tag. The notes of a `vX.Y.Z` release are the
+version's CHANGELOG.md section plus a link to the whole file, and the job fails
+when the tagged commit's CHANGELOG.md has no such section; a `vX.Y.Z-rc.N` tag
+becomes a pre-release with a fixed note that points at `[Unreleased]`. A re-run
+for a tag that already has a GitHub Release leaves it as it is.

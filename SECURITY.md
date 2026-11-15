@@ -25,7 +25,7 @@ Report privately through either channel — both reach the maintainer directly:
    the full report history in one place, and is the channel we use to issue the
    GHSA advisory and request a CVE.
 
-2. **Email:** `security@scrape.do`
+2. **Email:** `support@scrape.do`
    Use this if you cannot use GitHub's private reporting, or for anything
    sensitive enough that you'd rather not file even a private GitHub draft. PGP is
    available on request — email first and we'll exchange a key before you send
@@ -74,7 +74,7 @@ In scope:
 
 Out of scope:
 
-- Vulnerabilities in the Scrape.do API service — email security@scrape.do and
+- Vulnerabilities in the Scrape.do API service — email support@scrape.do and
   say the issue is in the Scrape.do service itself rather than in this
   repository.
 - Issues that require a pre-compromised local machine, a malicious local
@@ -138,8 +138,7 @@ We coordinate disclosure through GitHub's advisory system:
    **CVE ID** through the advisory. The CVE is linked to the GHSA.
 5. **Release.** We publish a patched release of the latest minor (a new Git tag),
    reference the advisory in the changelog, and retract affected versions with
-   `retract` directives in `go.mod` plus a `go list -retracted` advisory where
-   applicable.
+   `retract` directives in `go.mod` where applicable.
 6. **Publish.** We publish the GHSA — which propagates the CVE to the GitHub
    Advisory Database and the Go vulnerability database (`vuln.go.dev`) — so users
    running `govulncheck` and dependency scanners are alerted automatically.

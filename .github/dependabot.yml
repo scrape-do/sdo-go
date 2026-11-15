@@ -1,8 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
-# Keeps the Go module and the pinned GitHub Actions current. The cooldown waits
-# a week after a release before proposing it, so a compromised or broken
-# release has time to be caught and yanked upstream first. Action bumps arrive
-# as one grouped pull request, not one per action.
+# Keeps Go modules and the SHA-pinned actions current. The cooldown lets a new
+# release age a week before it is proposed, so a compromised or broken release
+# is usually caught and pulled before it reaches this repository.
 version: 2
 updates:
   - package-ecosystem: gomod

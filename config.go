@@ -24,7 +24,7 @@ var (
 	outputs     = []string{"raw", "markdown"}
 )
 
-// ScrapeConfig is the single, serializable request spec.
+// ScrapeConfig is the serializable request configuration shared by every sdo SDK.
 //
 // A zero value means "unset" and is omitted from the wire: false, 0, "" and an
 // empty slice or map. Unset values are never validated. Use ExtraParams to send

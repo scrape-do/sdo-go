@@ -40,9 +40,10 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
 
-  # Format + coverage floor run once, on Linux, not across the OS matrix: the
-  # scripts are bash (Windows runners default to PowerShell) and a CRLF checkout
-  # on Windows would make gofmt flag every file. The coverage floor is 99%.
+  # Format, hermeticity, the coverage floor and the workflow lint run once, on
+  # Linux, not across the OS matrix: the scripts are bash (Windows runners
+  # default to PowerShell) and a CRLF checkout on Windows would make gofmt flag
+  # every file. The floor is 99%.
   quality:
     runs-on: ubuntu-latest
     permissions:
@@ -63,6 +64,16 @@ jobs:
             gofmt -d .
             exit 1
           fi
+      # The suite must not depend on the runner's (or a developer's) Scrape.do
+      # settings: TestMain clears them, and this proves it.
+      - name: Tests are hermetic under hostile SDO_* settings
+        env:
+          SDO_TOKEN: hostile-token-value
+          SDO_BASE_URL: http://hostile.invalid
+          SDO_ASYNC_BASE_URL: http://hostile.invalid
+          SDO_TIMEOUT: abc
+          SDO_CONFIG_FILE: /nonexistent/sdo/config.json
+        run: go test ./...
       - name: Coverage floor (99%)
         run: |
           go test -race -coverprofile=coverage.out ./...
@@ -70,6 +81,21 @@ jobs:
           echo "total coverage: $pct%"
           awk -v p="$pct" 'BEGIN { exit (p+0 >= 99) ? 0 : 1 }' || {
             echo "::error::coverage $pct% is below the 99% floor" >&2; exit 1; }
+      # The workflows themselves: actionlint checks every job, expression and
+      # action input, and runs shellcheck (shipped with the runner image) on
+      # every run: script. It reads .github/actionlint.yaml. A version-pinned,
+      # checksum-verified release, like gitleaks in security.yml.
+      - name: Lint the workflows (actionlint)
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          set -euo pipefail
+          curl -sSfL --retry 5 --retry-delay 10 --retry-all-errors -o "$RUNNER_TEMP/actionlint.tar.gz" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/actionlint.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
 
   api-surface:
     runs-on: ubuntu-latest
@@ -90,39 +116,6 @@ jobs:
             echo "::error::Public API surface changed. Regenerate with 'go run tools/apisurface/main.go > api-surface.txt' and commit api-surface.txt." >&2
             exit 1
           fi
-
-  # Every commit of a pull request needs a Conventional Commit subject and a DCO
-  # sign-off (see CONTRIBUTING.md).
-  commits:
-    name: commits
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - name: Conventional Commit subjects and DCO sign-offs
-        env:
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD: ${{ github.event.pull_request.head.sha }}
-        run: |
-          set -euo pipefail
-          fail=0
-          for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
-            subject=$(git log -1 --format=%s "$sha")
-            if ! printf '%s\n' "$subject" | grep -qE '^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9][a-z0-9/_.-]*\))?!?: .+'; then
-              echo "::error::$sha: not a Conventional Commit subject: $subject"; fail=1
-            fi
-            # Bots (Dependabot) cannot certify the DCO; everyone else signs off.
-            case "$(git log -1 --format=%ae "$sha")" in *'[bot]@users.noreply.github.com') continue ;; esac
-            if ! git log -1 --format=%B "$sha" | grep -qE '^Signed-off-by: .+ <.+@.+>$'; then
-              echo "::error::$sha: missing Signed-off-by trailer (commit with git commit -s)"; fail=1
-            fi
-          done
-          exit "$fail"
 
   codeql:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository

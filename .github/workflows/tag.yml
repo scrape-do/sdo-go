@@ -1,8 +1,10 @@
 # SPDX-License-Identifier: Apache-2.0
 # A Go module is "published" by its tag: the module proxy fetches it on first
 # request, and a tag cannot be taken back. So every version tag is checked:
-# it must be on main and name the version in version.go.
-#   vX.Y.Z-rc.N  release candidate (a Go pre-release; `@latest` never picks it)
+# it must be on main and name the version in version.go. Once it passes, the
+# tag gets a GitHub Release whose notes are its CHANGELOG.md section.
+#   vX.Y.Z-rc.N  release candidate (a Go pre-release; `@latest` never picks it),
+#                a GitHub pre-release
 #   vX.Y.Z       release
 name: tag
 
@@ -35,3 +37,64 @@ jobs:
           if [ "$GITHUB_REF_NAME" != "$want" ]; then
             echo "::error::tag $GITHUB_REF_NAME does not match version.go ($want)"; exit 1
           fi
+
+  # The GitHub Release for the tag. It runs on the org's self-hosted runners:
+  # the org's IP allow list rejects GitHub API calls from GitHub-hosted
+  # runners. It reads CHANGELOG.md from the checkout and runs no repository
+  # code. A re-run for a tag that already has a release changes nothing.
+  github-release:
+    needs: check
+    if: github.repository_owner == 'scrape-do'
+    runs-on: self-hosted
+    permissions:
+      contents: write # create the GitHub Release
+    steps:
+      # The persistent runners may still hold root-owned files that an older,
+      # container-based job left in this workspace or in the runner's temp
+      # directory (CodeQL writes its PR diff range there); reclaim both.
+      - name: Reclaim the workspace
+        working-directory: ${{ github.workspace }}
+        run: docker run --rm -v "$PWD:/w" -v "$RUNNER_TEMP:/t" busybox:1.37.0@sha256:66a6306db78bf2dbf3487f293aa8d6990d8e506fdffab9cc43fe422becf886e4 chown -R "$(id -u):$(id -g)" /w /t
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The release notes: this version's CHANGELOG.md section. A release
+      # candidate has none yet (its changes are still under [Unreleased]).
+      - name: Release notes from CHANGELOG.md
+        run: |
+          set -euo pipefail
+          notes="$RUNNER_TEMP/notes.md"
+          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then
+            echo "Release candidate; see CHANGELOG.md [Unreleased]." > "$notes"
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="$version" '/^## \[/{p = ($2 == "[" v "]")} p' CHANGELOG.md | sed '1d' > "$notes"
+          [ -s "$notes" ] || { echo "::error::CHANGELOG.md has no section for $version" >&2; exit 1; }
+          printf '\nFull changelog: https://github.com/%s/blob/%s/CHANGELOG.md\n' "$GITHUB_REPOSITORY" "$GITHUB_REF_NAME" >> "$notes"
+      # The self-hosted runners do not ship the GitHub CLI: install a pinned,
+      # checksum-verified release.
+      - name: Install gh
+        env:
+          GH_VERSION: 2.102.0
+          GH_SHA256: bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
+        run: |
+          set -euo pipefail
+          curl -sSfL --retry 5 --retry-delay 10 --retry-all-errors -o "$RUNNER_TEMP/gh.tar.gz" \
+            "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz"
+          echo "${GH_SHA256}  $RUNNER_TEMP/gh.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/gh.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/gh_${GH_VERSION}_linux_amd64/bin" >> "$GITHUB_PATH"
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo "::notice::$GITHUB_REF_NAME already has a GitHub Release; nothing to do"
+            exit 0
+          fi
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-rc.* ]]; then prerelease=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag "${prerelease[@]}" \
+            --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

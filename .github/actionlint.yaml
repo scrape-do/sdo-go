@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+# Read by the actionlint step of ci.yml's quality job, and by a local
+# `actionlint` run from the repository root.
+self-hosted-runner:
+  # A GitHub-hosted label that actionlint v1.7.7 and older do not know (CI pins
+  # a newer release); listed so an older local actionlint agrees with CI.
+  labels: [windows-11-arm]
