@@ -5,6 +5,8 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 Before 1.0, a minor version may contain breaking changes; each is marked **Breaking** and described in MIGRATING.md. Patch versions never break.
 
+## [Unreleased]
+
 ## [0.2.1] - 2026-11-15
 
 ### Added
