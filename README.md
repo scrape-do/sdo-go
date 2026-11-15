@@ -285,8 +285,10 @@ not taken from the main API's); `JobStatus.AcquiredConcurrency` and
 
 A release is a version tag that a maintainer pushes from `main` only;
 `tag.yml` checks each tag's format, that it is on `main`, and that it matches
-`version.go`. The CI workflows are described in
-[CONTRIBUTING.md](CONTRIBUTING.md#ci-workflows).
+`version.go`, then creates the tag's GitHub Release with the version's
+CHANGELOG.md section as its notes (a pre-release for a `-rc.N` tag). The
+release steps are in [CONTRIBUTING.md](CONTRIBUTING.md#releasing) and the CI
+workflows in [CONTRIBUTING.md](CONTRIBUTING.md#ci-workflows).
 
 ## Responsible use
 

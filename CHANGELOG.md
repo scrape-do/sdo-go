@@ -7,6 +7,10 @@ Before 1.0, a minor version may contain breaking changes; each is marked **Break
 
 ## [Unreleased]
 
+### Added
+
+- Each tag now gets a GitHub Release with its CHANGELOG section.
+
 ### Fixed
 
 - The postal-code option is sent as the documented `zipcode` query parameter (it was sent as `zipCode`).
