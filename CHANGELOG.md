@@ -5,7 +5,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/) · [SemVer](https://semv
 
 Before 1.0, a minor version may contain breaking changes; each is marked **Breaking** and described in MIGRATING.md. Patch versions never break.
 
-## [Unreleased]
+## [0.2.1] - 2026-11-15
 
 ### Added
 
@@ -203,6 +203,7 @@ It requires Go 1.26.9 or newer.
   a `.gitleaks.toml` or `.gitleaksignore`.
 - The User-Agent is exactly `sdo-sdk-go/<version>`; the SDK sends no telemetry.
 
-[Unreleased]: https://github.com/scrape-do/sdo-go/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/scrape-do/sdo-go/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/scrape-do/sdo-go/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/scrape-do/sdo-go/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/scrape-do/sdo-go/releases/tag/v0.1.0
