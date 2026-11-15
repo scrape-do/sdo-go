@@ -55,7 +55,7 @@ These contracts are intentional and will not change without a migration section
 here (and, from 1.0 on, a major version bump):
 
 - **Token-only auth.** Authentication is always the `SDO_TOKEN` environment
-  variable (or the equivalent explicit option passed to the client constructor).
+  variable (or the token argument of `New`).
   There is no other credential mechanism.
 - **No telemetry.** `sdo-go` never phones home, never emits usage analytics, and
   has no opt-out to manage. Upgrades will not introduce any.

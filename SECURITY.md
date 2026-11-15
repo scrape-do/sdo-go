@@ -138,8 +138,7 @@ We coordinate disclosure through GitHub's advisory system:
    **CVE ID** through the advisory. The CVE is linked to the GHSA.
 5. **Release.** We publish a patched release of the latest minor (a new Git tag),
    reference the advisory in the changelog, and retract affected versions with
-   `retract` directives in `go.mod` plus a `go list -retracted` advisory where
-   applicable.
+   `retract` directives in `go.mod` where applicable.
 6. **Publish.** We publish the GHSA — which propagates the CVE to the GitHub
    Advisory Database and the Go vulnerability database (`vuln.go.dev`) — so users
    running `govulncheck` and dependency scanners are alerted automatically.
