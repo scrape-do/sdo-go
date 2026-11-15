@@ -77,15 +77,16 @@ func ExampleClient_Scrape_render() {
 	fmt.Println(res.Text())
 }
 
-// ExampleScrapeConfig demonstrates the request spec and error inspection. A
-// gateway-origin failure is an *sdo.APIError whose Kind classifies the cause.
+// ExampleScrapeConfig demonstrates a request configuration and error
+// inspection. A gateway-origin failure is an *sdo.APIError whose Kind
+// classifies the cause.
 func ExampleScrapeConfig() {
 	client, err := sdo.New("your-token")
 	if err != nil {
 		return
 	}
 	cfg := &sdo.ScrapeConfig{
-		URL:        "https://httpbin.org/json",
+		URL:        "https://example.com/api",
 		SuperProxy: true,
 		Device:     "desktop",
 	}
@@ -107,8 +108,8 @@ func ExampleClient_Plugin() {
 		return
 	}
 	out, err := client.Plugin(context.Background(), "google/shopping", map[string]any{
-		"q":       "laptop",
-		"geoCode": "us",
+		"q":  "laptop",
+		"gl": "us",
 	})
 	if err != nil {
 		return
@@ -124,7 +125,7 @@ func ExampleClient_Do() {
 		return
 	}
 	res, err := client.Do(context.Background(),
-		&sdo.ScrapeConfig{URL: "https://httpbin.org/post", CustomHeaders: true},
+		&sdo.ScrapeConfig{URL: "https://example.com/search", CustomHeaders: true},
 		&sdo.Request{
 			JSON:    map[string]any{"query": "laptop", "page": 1},
 			Headers: map[string]string{"Accept": "application/json"},
