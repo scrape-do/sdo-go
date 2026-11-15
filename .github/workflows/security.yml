@@ -60,8 +60,8 @@ jobs:
           scan-args: |-
             --lockfile=./go.mod
 
-  # Checks the dependencies and the standard library against Go's vulnerability
-  # database (vuln.go.dev), reporting what the module's code can reach.
+  # Go's official vulnerability scanner: checks the module (and reachable call
+  # paths) against the Go vulnerability database.
   govulncheck:
     runs-on: ubuntu-latest
     permissions:
