@@ -4,8 +4,8 @@ go 1.26.9
 
 require (
 	github.com/PuerkitoBio/goquery v1.13.0
-	github.com/andybalholm/brotli v1.2.8
-	golang.org/x/text v0.43.0
+	github.com/andybalholm/brotli v1.3.0
+	golang.org/x/text v0.44.0
 )
 
 require (
